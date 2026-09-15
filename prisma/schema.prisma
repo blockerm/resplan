@@ -1,0 +1,166 @@
+// Resource Loader — Prisma schema
+// SQLite for local, single-user deployment.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// -------- Configuration --------
+
+model Role {
+  id              String   @id @default(cuid())
+  name            String   @unique
+  description     String?
+  active          Boolean  @default(true)
+  order           Int      @default(0)
+  // Pool of unnamed FTE available for this role each month. Adds to whatever
+  // named resources contribute via ResourceCapability. Lets the solver work
+  // before individual staffing decisions are made.
+  defaultCapacity Float    @default(0)
+  createdAt       DateTime @default(now())
+
+  demands      PhaseRoleDemand[]
+  capabilities ResourceCapability[]
+  assignments  Assignment[]
+}
+
+model Phase {
+  id           String   @id @default(cuid())
+  name         String   @unique
+  order        Int      @default(0)
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  projectPhases ProjectPhase[]
+}
+
+// -------- Resources --------
+
+model Resource {
+  id                String   @id @default(cuid())
+  name              String
+  email             String?  @unique
+  defaultCapacity   Float    @default(1.0) // FTE per month baseline (1.0 = full-time)
+  active            Boolean  @default(true)
+  createdAt         DateTime @default(now())
+
+  capabilities      ResourceCapability[]
+  capacityOverrides CapacityOverride[]
+  assignments       Assignment[]
+}
+
+model ResourceCapability {
+  id           String @id @default(cuid())
+  resourceId   String
+  roleId       String
+  proficiency  Int    @default(3) // 1..5 optional signal, not used by solver v1
+
+  resource     Resource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  role         Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([resourceId, roleId])
+}
+
+// Per-month override to model PTO, ramp-up, part-time, etc.
+model CapacityOverride {
+  id           String   @id @default(cuid())
+  resourceId   String
+  month        String   // ISO 'YYYY-MM'
+  capacity     Float    // FTE for that month (0..2)
+  note         String?
+
+  resource     Resource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+
+  @@unique([resourceId, month])
+}
+
+// -------- Projects --------
+
+model Project {
+  id                String   @id @default(cuid())
+  code              String   @unique
+  name              String
+  description       String?
+  priority          Int      @default(3) // 1 = highest
+  status            String   @default("PLANNED") // PLANNED | ACTIVE | ON_HOLD | COMPLETE | CANCELLED
+  // Single scheduling constraint:
+  //   ASAP         — solver may shift right freely to fit capacity
+  //   MUST_START   — first phase pinned to constraintMonth
+  //   MUST_FINISH  — last phase must finish on/before constraintMonth (hard cap)
+  constraint        String   @default("ASAP") // ASAP | MUST_START | MUST_FINISH
+  constraintMonth   String?  // 'YYYY-MM' — required when constraint != ASAP
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  phases            ProjectPhase[]
+  dependsOn         Dependency[]  @relation("Dependent")
+  dependencyOf      Dependency[]  @relation("DependsOn")
+}
+
+model ProjectPhase {
+  id              String   @id @default(cuid())
+  projectId       String
+  phaseId         String
+  plannedStart    DateTime // first day of month conceptually; solver rounds to months
+  plannedEnd      DateTime // last day of month conceptually
+  solvedStart     DateTime?
+  solvedEnd       DateTime?
+  note            String?
+
+  project         Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  phase           Phase   @relation(fields: [phaseId], references: [id])
+
+  demands         PhaseRoleDemand[]
+  assignments     Assignment[]
+
+  @@unique([projectId, phaseId])
+}
+
+// FTE per role per project-phase. Solver spreads evenly across the phase's months.
+model PhaseRoleDemand {
+  id              String @id @default(cuid())
+  projectPhaseId  String
+  roleId          String
+  fte             Float  // e.g. 0.5 = half-time for the phase duration
+
+  projectPhase    ProjectPhase @relation(fields: [projectPhaseId], references: [id], onDelete: Cascade)
+  role            Role         @relation(fields: [roleId], references: [id])
+
+  @@unique([projectPhaseId, roleId])
+}
+
+model Dependency {
+  id              String @id @default(cuid())
+  dependentId     String // project that is downstream
+  dependsOnId     String // project that is the predecessor
+  type            String @default("FS") // FS | SS | FF | SF
+  lagMonths       Int    @default(0)     // may be negative (lead)
+  note            String?
+
+  dependent       Project @relation("Dependent", fields: [dependentId], references: [id], onDelete: Cascade)
+  dependsOn       Project @relation("DependsOn", fields: [dependsOnId], references: [id], onDelete: Cascade)
+
+  @@unique([dependentId, dependsOnId])
+}
+
+// -------- Assignments (post-leveling) --------
+
+model Assignment {
+  id              String @id @default(cuid())
+  projectPhaseId  String
+  roleId          String
+  resourceId      String
+  month           String // 'YYYY-MM'
+  fte             Float  // fraction of resource capacity for that month
+
+  projectPhase    ProjectPhase @relation(fields: [projectPhaseId], references: [id], onDelete: Cascade)
+  role            Role         @relation(fields: [roleId], references: [id])
+  resource        Resource     @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+
+  @@unique([projectPhaseId, roleId, resourceId, month])
+}
