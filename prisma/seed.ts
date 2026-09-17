@@ -135,7 +135,6 @@ async function main() {
         description: p.description,
         priority: p.priority,
         status: p.status,
-        targetCompletion: new Date(p.target),
       },
       create: {
         code: p.code,
@@ -143,7 +142,6 @@ async function main() {
         description: p.description,
         priority: p.priority,
         status: p.status,
-        targetCompletion: new Date(p.target),
       },
     });
 
