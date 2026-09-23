@@ -8,13 +8,15 @@
 // shim resolves them from whatever the provider actually injected.
 const pooledCandidates = [
   process.env.DATABASE_URL,
-  process.env.POSTGRES_PRISMA_URL,
+  process.env.PRISMA_DATABASE_URL,     // Vercel "Prisma Postgres" integration
+  process.env.POSTGRES_PRISMA_URL,     // classic Vercel Postgres
   process.env.POSTGRES_URL,
   process.env.NEON_DATABASE_URL,
 ];
 const directCandidates = [
   process.env.DIRECT_URL,
   process.env.POSTGRES_URL_NON_POOLING,
+  process.env.PRISMA_DATABASE_URL,
   process.env.POSTGRES_URL,
   process.env.DATABASE_URL,
 ];
