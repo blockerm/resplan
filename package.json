@@ -7,9 +7,9 @@
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "next lint",
-    "db:push": "prisma db push",
-    "db:seed": "tsx prisma/seed.ts",
-    "db:reset": "prisma db push --force-reset && tsx prisma/seed.ts",
+    "db:push": "node scripts/pg-env.mjs npx prisma db push",
+    "db:seed": "node scripts/pg-env.mjs npx tsx prisma/seed.ts",
+    "db:reset": "node scripts/pg-env.mjs npx prisma db push --force-reset && npm run db:seed",
     "postinstall": "prisma generate"
   },
   "dependencies": {

@@ -60,9 +60,9 @@ Repo lives at https://github.com/blockerm/resplan.
 
 ### 3. Provision Postgres
 
-**On Vercel** (Storage → Create Database → Postgres) *or* use **Neon / Supabase** and paste the URLs.
+**Option A — Vercel Postgres (zero-config)**: Storage → Create Database → Postgres → attach to project. Vercel auto-injects `POSTGRES_PRISMA_URL` and `POSTGRES_URL_NON_POOLING`; the app maps them to `DATABASE_URL` / `DIRECT_URL` at runtime — no manual env-var setup needed.
 
-In **Project Settings → Environment Variables**, add for all environments:
+**Option B — Neon / Supabase / other**: in Project Settings → Environment Variables, add for all environments:
 ```
 DATABASE_URL   = <pooled connection string>
 DIRECT_URL     = <direct/non-pooled connection string>
@@ -75,9 +75,9 @@ Click **Deploy**. Vercel runs `npm run build` (which does `prisma generate && ne
 Pull the prod env vars locally and apply the schema:
 ```bash
 vercel env pull .env.production.local
-npx dotenv -e .env.production.local -- npx prisma db push
+npx dotenv -e .env.production.local -- npm run db:push
 ```
-Or set them in a shell and run `npx prisma db push` directly.
+`npm run db:push` uses `scripts/pg-env.mjs` under the hood, so it also handles `POSTGRES_PRISMA_URL` automatically.
 
 ### 6. Populate data
 Once the app is live, open `/import` and upload CSVs for Roles, Projects, Dependencies. Or run `npm run db:seed` against the prod DB (dev seed data — probably not what you want).
