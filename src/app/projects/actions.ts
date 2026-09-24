@@ -39,19 +39,26 @@ const ProjectInput = z.object({
     .regex(/^\d{4}-\d{2}$/, "Month must be YYYY-MM")
     .optional()
     .nullable(),
+  patternId: z.string().optional().nullable(),
+  startDate: z.string().optional().nullable(),
+  endDate: z.string().optional().nullable(),
 });
+
+function toDateOrNull(v: string | null | undefined): Date | null {
+  if (!v) return null;
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? null : d;
+}
 
 function parseProjectForm(formData: FormData) {
   let constraint = (formData.get("constraint") as string) || "ASAP";
   let constraintMonth =
     constraint === "ASAP" ? null : (formData.get("constraintMonth") as string) || null;
-  // Safety net: if the client somehow submitted a non-ASAP constraint without
-  // a month (client-side `required` should catch this), silently fall back to
-  // ASAP rather than crash. The UI can then re-render with correct state.
   if (constraint !== "ASAP" && !constraintMonth) {
     constraint = "ASAP";
     constraintMonth = null;
   }
+  const patternId = ((formData.get("patternId") as string) || "").trim() || null;
   return ProjectInput.parse({
     code: formData.get("code"),
     name: formData.get("name"),
@@ -60,20 +67,124 @@ function parseProjectForm(formData: FormData) {
     status: formData.get("status") || "PLANNED",
     constraint,
     constraintMonth,
+    patternId,
+    startDate: (formData.get("startDate") as string) || null,
+    endDate: (formData.get("endDate") as string) || null,
   });
+}
+
+// Generate ProjectPhase + PhaseRoleDemand rows from the project's pattern.
+// Wipes any existing phases and demands for the project first.
+export async function generateFromPattern(projectId: string): Promise<{
+  ok: boolean;
+  message: string;
+}> {
+  const proj = await db.project.findUnique({
+    where: { id: projectId },
+    include: {
+      pattern: {
+        include: {
+          phaseWeights: { include: { phase: true }, orderBy: { order: "asc" } },
+          roleIntensities: true,
+        },
+      },
+    },
+  });
+  if (!proj) return { ok: false, message: "Project not found" };
+  if (!proj.pattern) return { ok: false, message: "No pattern selected" };
+  if (!proj.startDate || !proj.endDate)
+    return { ok: false, message: "Start and end dates required" };
+  if (proj.endDate <= proj.startDate)
+    return { ok: false, message: "End date must be after start date" };
+  const weights = proj.pattern.phaseWeights;
+  if (weights.length === 0)
+    return { ok: false, message: "Pattern has no phases configured" };
+
+  // Wipe existing phases (cascades to demand + assignments)
+  await db.projectPhase.deleteMany({ where: { projectId } });
+
+  // Total inclusive day span
+  const totalDays =
+    Math.round(
+      (proj.endDate.getTime() - proj.startDate.getTime()) / (1000 * 60 * 60 * 24),
+    ) + 1;
+  const totalWeight = weights.reduce((s, w) => s + w.weightPct, 0);
+  const norm = totalWeight > 0 ? totalWeight : 1;
+
+  let cursor = new Date(proj.startDate);
+  for (let i = 0; i < weights.length; i++) {
+    const w = weights[i];
+    const isLast = i === weights.length - 1;
+    let phaseDays = Math.max(1, Math.round((w.weightPct / norm) * totalDays));
+    const phaseStart = new Date(cursor);
+    let phaseEnd: Date;
+    if (isLast) {
+      phaseEnd = new Date(proj.endDate);
+    } else {
+      phaseEnd = new Date(phaseStart);
+      phaseEnd.setUTCDate(phaseEnd.getUTCDate() + phaseDays - 1);
+    }
+    const pp = await db.projectPhase.create({
+      data: {
+        projectId,
+        phaseId: w.phaseId,
+        plannedStart: phaseStart,
+        plannedEnd: phaseEnd,
+      },
+    });
+
+    // Role demand for this phase from the pattern's intensity matrix
+    const intensities = proj.pattern.roleIntensities.filter(
+      (r) => r.phaseId === w.phaseId,
+    );
+    for (const it of intensities) {
+      if (it.engagement === "NOT_ENGAGED") continue;
+      if (it.fte <= 0) continue;
+      await db.phaseRoleDemand.create({
+        data: { projectPhaseId: pp.id, roleId: it.roleId, fte: it.fte },
+      });
+    }
+
+    cursor = new Date(phaseEnd);
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+
+  revalidatePath(`/projects/${projectId}`);
+  revalidatePath("/level-load");
+  return {
+    ok: true,
+    message: `Regenerated ${weights.length} phases + role demand from "${proj.pattern.name}".`,
+  };
 }
 
 export async function createProject(formData: FormData) {
   const parsed = parseProjectForm(formData);
-  const created = await db.project.create({ data: parsed });
+  const created = await db.project.create({
+    data: {
+      ...parsed,
+      startDate: toDateOrNull(parsed.startDate),
+      endDate: toDateOrNull(parsed.endDate),
+    },
+  });
   await enforceStatusConstraints(created.id);
+  // Auto-generate phases + demand if pattern + dates were provided
+  if (parsed.patternId && parsed.startDate && parsed.endDate) {
+    await generateFromPattern(created.id);
+  }
   revalidatePath("/projects");
   redirect(`/projects/${created.id}`);
 }
 
 export async function updateProject(id: string, formData: FormData) {
   const parsed = parseProjectForm(formData);
-  await db.project.update({ where: { id }, data: parsed });
+  await db.project.update({
+    where: { id },
+    data: {
+      ...parsed,
+      startDate: toDateOrNull(parsed.startDate),
+      endDate: toDateOrNull(parsed.endDate),
+    },
+  });
   await enforceStatusConstraints(id);
   revalidatePath("/projects");
   revalidatePath(`/projects/${id}`);

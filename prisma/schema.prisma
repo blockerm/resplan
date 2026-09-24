@@ -25,9 +25,10 @@ model Role {
   defaultCapacity Float    @default(0)
   createdAt       DateTime @default(now())
 
-  demands      PhaseRoleDemand[]
-  capabilities ResourceCapability[]
-  assignments  Assignment[]
+  demands             PhaseRoleDemand[]
+  capabilities        ResourceCapability[]
+  assignments         Assignment[]
+  patternIntensities  PatternRoleIntensity[]
 }
 
 model Phase {
@@ -37,7 +38,9 @@ model Phase {
   active       Boolean  @default(true)
   createdAt    DateTime @default(now())
 
-  projectPhases ProjectPhase[]
+  projectPhases      ProjectPhase[]
+  patternWeights     PatternPhaseWeight[]
+  patternIntensities PatternRoleIntensity[]
 }
 
 // -------- Resources --------
@@ -95,12 +98,65 @@ model Project {
   //   MUST_FINISH  — last phase must finish on/before constraintMonth (hard cap)
   constraint        String   @default("ASAP") // ASAP | MUST_START | MUST_FINISH
   constraintMonth   String?  // 'YYYY-MM' — required when constraint != ASAP
+  // Pattern-driven scheduling: when a pattern + startDate + endDate are set,
+  // phases + role demand are auto-generated from the pattern.
+  patternId         String?
+  pattern           ProjectPattern? @relation(fields: [patternId], references: [id])
+  startDate         DateTime?
+  endDate           DateTime?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
   phases            ProjectPhase[]
   dependsOn         Dependency[]  @relation("Dependent")
   dependencyOf      Dependency[]  @relation("DependsOn")
+}
+
+// -------- Project Patterns (templates) --------
+// A ProjectPattern is a template: it defines which phases apply, each phase's
+// % of the overall project duration, and per-role FTE demand within each phase.
+// When a project selects a pattern + startDate + endDate, the tool auto-creates
+// ProjectPhase + PhaseRoleDemand rows from the pattern.
+
+model ProjectPattern {
+  id             String   @id @default(cuid())
+  name           String   @unique
+  description    String?
+  order          Int      @default(0)
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  phaseWeights    PatternPhaseWeight[]
+  roleIntensities PatternRoleIntensity[]
+  projects        Project[]
+}
+
+model PatternPhaseWeight {
+  id           String   @id @default(cuid())
+  patternId    String
+  phaseId      String
+  weightPct    Float    // 0..1; sums to 1 across a pattern's phases
+  order        Int      @default(0) // sequence within pattern (0-indexed)
+
+  pattern      ProjectPattern @relation(fields: [patternId], references: [id], onDelete: Cascade)
+  phase        Phase          @relation(fields: [phaseId], references: [id])
+
+  @@unique([patternId, phaseId])
+}
+
+model PatternRoleIntensity {
+  id           String   @id @default(cuid())
+  patternId    String
+  phaseId      String
+  roleId       String
+  fte          Float    // FTE demand if this role is engaged in this phase
+  engagement   String   // CORE | SITUATIONAL | NOT_ENGAGED
+
+  pattern      ProjectPattern @relation(fields: [patternId], references: [id], onDelete: Cascade)
+  phase        Phase          @relation(fields: [phaseId], references: [id])
+  role         Role           @relation(fields: [roleId], references: [id])
+
+  @@unique([patternId, phaseId, roleId])
 }
 
 model ProjectPhase {

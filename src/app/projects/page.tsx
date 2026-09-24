@@ -12,12 +12,20 @@ function constraintLabel(c: string, month: string | null): React.ReactNode {
 }
 
 export default async function ProjectsPage() {
-  const projects = await db.project.findMany({
-    orderBy: [{ priority: "asc" }, { name: "asc" }],
-    include: {
-      _count: { select: { phases: true, dependsOn: true } },
-    },
-  });
+  const [projects, patterns] = await Promise.all([
+    db.project.findMany({
+      orderBy: [{ priority: "asc" }, { name: "asc" }],
+      include: {
+        pattern: { select: { name: true } },
+        _count: { select: { phases: true, dependsOn: true } },
+      },
+    }),
+    db.projectPattern.findMany({
+      where: { active: true },
+      orderBy: { order: "asc" },
+      select: { id: true, name: true },
+    }),
+  ]);
 
   return (
     <div className="space-y-6">
@@ -54,6 +62,23 @@ export default async function ProjectsPage() {
                 <option value="CANCELLED">Cancelled</option>
               </select>
             </div>
+            <div className="col-span-2">
+              <label className="label">Pattern (auto-generates phases + role demand)</label>
+              <select name="patternId" className="input" defaultValue="">
+                <option value="">— none —</option>
+                {patterns.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="label">Start date</label>
+              <input name="startDate" type="date" className="input" />
+            </div>
+            <div>
+              <label className="label">End date</label>
+              <input name="endDate" type="date" className="input" />
+            </div>
             <ConstraintInputs />
           </div>
           <div>
@@ -70,6 +95,7 @@ export default async function ProjectsPage() {
               <th className="table-th">Name</th>
               <th className="table-th w-20 text-center">Priority</th>
               <th className="table-th w-28">Status</th>
+              <th className="table-th w-40">Pattern</th>
               <th className="table-th w-40">Constraint</th>
               <th className="table-th w-20 text-center">Phases</th>
               <th className="table-th w-20 text-center">Deps</th>
@@ -77,7 +103,7 @@ export default async function ProjectsPage() {
           </thead>
           <tbody>
             {projects.length === 0 && (
-              <tr><td colSpan={7} className="py-4 text-sm text-slate-500">No projects yet.</td></tr>
+              <tr><td colSpan={8} className="py-4 text-sm text-slate-500">No projects yet.</td></tr>
             )}
             {projects.map((p) => (
               <tr key={p.id} className="border-b border-slate-100 last:border-0">
@@ -89,6 +115,9 @@ export default async function ProjectsPage() {
                 </td>
                 <td className="table-td text-center">{p.priority}</td>
                 <td className="table-td">{p.status}</td>
+                <td className="table-td text-xs text-slate-600">
+                  {p.pattern?.name ?? "—"}
+                </td>
                 <td className="table-td text-xs">
                   {constraintLabel(p.constraint, p.constraintMonth)}
                 </td>

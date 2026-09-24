@@ -13,6 +13,7 @@ import {
 import { ConstraintInputs } from "../ConstraintInputs";
 import { DemandFteInput } from "../DemandFteInput";
 import { PhaseDates } from "../PhaseDates";
+import { GenerateFromPatternButton } from "../GenerateFromPatternButton";
 
 export const dynamic = "force-dynamic";
 
@@ -35,13 +36,18 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
   });
   if (!project) return notFound();
 
-  const [phases, roles, allProjects] = await Promise.all([
+  const [phases, roles, allProjects, patterns] = await Promise.all([
     db.phase.findMany({ where: { active: true }, orderBy: [{ order: "asc" }, { name: "asc" }] }),
     db.role.findMany({ where: { active: true }, orderBy: [{ order: "asc" }, { name: "asc" }] }),
     db.project.findMany({
       where: { id: { not: project.id } },
       orderBy: [{ code: "asc" }],
       select: { id: true, code: true, name: true },
+    }),
+    db.projectPattern.findMany({
+      where: { active: true },
+      orderBy: { order: "asc" },
+      select: { id: true, name: true },
     }),
   ]);
 
@@ -105,6 +111,37 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
                 <option value="CANCELLED">Cancelled</option>
               </select>
             </div>
+            <div className="col-span-2">
+              <label className="label">Pattern</label>
+              <select
+                name="patternId"
+                className="input"
+                defaultValue={project.patternId ?? ""}
+              >
+                <option value="">— none —</option>
+                {patterns.map((pt) => (
+                  <option key={pt.id} value={pt.id}>{pt.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="label">Start date</label>
+              <input
+                name="startDate"
+                type="date"
+                defaultValue={isoDate(project.startDate)}
+                className="input"
+              />
+            </div>
+            <div>
+              <label className="label">End date</label>
+              <input
+                name="endDate"
+                type="date"
+                defaultValue={isoDate(project.endDate)}
+                className="input"
+              />
+            </div>
             <ConstraintInputs
               defaultConstraint={project.constraint}
               defaultConstraintMonth={project.constraintMonth}
@@ -129,6 +166,17 @@ export default async function ProjectDetailPage({ params }: { params: { id: stri
             </button>
           </div>
         </form>
+
+        {project.patternId && project.startDate && project.endDate && (
+          <div className="mt-3 flex items-center gap-3 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
+            <span>
+              This project has a pattern selected. Click regenerate to (re)build phases
+              + role demand from the pattern — this <strong>replaces</strong> current
+              phases, demand, and any manual FTE adjustments.
+            </span>
+            <GenerateFromPatternButton projectId={project.id} />
+          </div>
+        )}
 
         {project.status !== "PLANNED" && (
           <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
