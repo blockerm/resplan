@@ -12,6 +12,7 @@ import {
 import { WeightInput } from "../WeightInput";
 import { IntensityCell } from "../IntensityCell";
 import { EngagementSelector } from "../EngagementSelector";
+import { OrderInput } from "../OrderInput";
 
 export const dynamic = "force-dynamic";
 
@@ -146,15 +147,7 @@ export default async function PatternDetailPage({
                   >
                     <input type="hidden" name="phaseId" value={w.phaseId} />
                     <input type="hidden" name="weightPct" value={w.weightPct} />
-                    <input
-                      name="order"
-                      type="number"
-                      defaultValue={w.order}
-                      className="input w-16 text-right"
-                      onBlur={(e) => {
-                        if (e.currentTarget.value !== String(w.order)) e.currentTarget.form?.requestSubmit();
-                      }}
-                    />
+                    <OrderInput defaultValue={w.order} />
                   </form>
                 </td>
                 <td className="table-td text-right">
