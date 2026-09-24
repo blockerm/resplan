@@ -78,14 +78,12 @@ export async function upsertPatternPhaseWeight(patternId: string, formData: Form
 }
 
 export async function removePatternPhaseWeight(id: string, patternId: string) {
+  const weight = await db.patternPhaseWeight.findUnique({ where: { id } });
+  if (!weight) return;
+  await db.patternRoleIntensity.deleteMany({
+    where: { patternId, phaseId: weight.phaseId },
+  });
   await db.patternPhaseWeight.delete({ where: { id } });
-  // Also remove any intensity cells for this phase in this pattern (dangling)
-  const weight = await db.patternPhaseWeight.findUnique({ where: { id } }).catch(() => null);
-  if (weight) {
-    await db.patternRoleIntensity.deleteMany({
-      where: { patternId, phaseId: weight.phaseId },
-    });
-  }
   revalidatePath(`/patterns/${patternId}`);
 }
 

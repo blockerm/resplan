@@ -194,28 +194,14 @@ export default async function PatternDetailPage({
             </div>
             <div>
               <label className="label">Weight %</label>
-              <input name="weightPct" type="number" step="1" min={0} max={100} defaultValue={0} className="input text-right" />
+              <WeightInput defaultPct={0} />
             </div>
             <div>
               <label className="label">Order</label>
               <input name="order" type="number" defaultValue={pattern.phaseWeights.length} className="input text-right" />
             </div>
             <div className="flex items-end">
-              <button
-                className="btn-primary"
-                type="submit"
-                onClick={(e) => {
-                  // Convert weight % → fraction before submit
-                  const form = (e.currentTarget as HTMLButtonElement).form!;
-                  const wInput = form.elements.namedItem("weightPct") as HTMLInputElement | null;
-                  if (wInput) {
-                    const n = Number(wInput.value) || 0;
-                    wInput.value = String(n / 100);
-                  }
-                }}
-              >
-                Add phase
-              </button>
+              <button className="btn-primary">Add phase</button>
             </div>
           </form>
         )}
