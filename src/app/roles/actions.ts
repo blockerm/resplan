@@ -37,16 +37,19 @@ export async function updateRole(id: string, formData: FormData) {
 }
 
 export async function deleteRole(id: string) {
-  // Refuse if referenced by demand or assignments.
-  const [demand, assign] = await Promise.all([
+  // Role is referenced by PhaseRoleDemand, ResourceCapability, Assignment,
+  // and PatternRoleIntensity. Any reference means we can't hard-delete.
+  const [demand, capability, assign, patternUse] = await Promise.all([
     db.phaseRoleDemand.count({ where: { roleId: id } }),
+    db.resourceCapability.count({ where: { roleId: id } }),
     db.assignment.count({ where: { roleId: id } }),
+    db.patternRoleIntensity.count({ where: { roleId: id } }),
   ]);
-  if (demand + assign > 0) {
-    // Soft-deactivate instead of hard delete.
+  if (demand + capability + assign + patternUse > 0) {
     await db.role.update({ where: { id }, data: { active: false } });
   } else {
     await db.role.delete({ where: { id } });
   }
   revalidatePath("/roles");
+  revalidatePath("/patterns");
 }

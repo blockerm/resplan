@@ -31,11 +31,18 @@ export async function updatePhase(id: string, formData: FormData) {
 }
 
 export async function deletePhase(id: string) {
-  const used = await db.projectPhase.count({ where: { phaseId: id } });
-  if (used > 0) {
+  // Phase is referenced by ProjectPhase, PatternPhaseWeight, and
+  // PatternRoleIntensity. Any reference means we can't hard-delete.
+  const [projectUse, patternUse, intensityUse] = await Promise.all([
+    db.projectPhase.count({ where: { phaseId: id } }),
+    db.patternPhaseWeight.count({ where: { phaseId: id } }),
+    db.patternRoleIntensity.count({ where: { phaseId: id } }),
+  ]);
+  if (projectUse + patternUse + intensityUse > 0) {
     await db.phase.update({ where: { id }, data: { active: false } });
   } else {
     await db.phase.delete({ where: { id } });
   }
   revalidatePath("/phases");
+  revalidatePath("/patterns");
 }
