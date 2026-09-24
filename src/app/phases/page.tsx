@@ -8,7 +8,15 @@ const ROW = "grid grid-cols-[64px_minmax(200px,1fr)_80px_80px_180px] items-cente
 export default async function PhasesPage() {
   const phases = await db.phase.findMany({
     orderBy: [{ order: "asc" }, { name: "asc" }],
-    include: { _count: { select: { projectPhases: true } } },
+    include: {
+      _count: {
+        select: {
+          projectPhases: true,
+          patternWeights: true,
+          patternIntensities: true,
+        },
+      },
+    },
   });
 
   return (
@@ -46,26 +54,35 @@ export default async function PhasesPage() {
           {phases.length === 0 && (
             <div className="py-4 text-sm text-slate-500">No phases yet.</div>
           )}
-          {phases.map((p) => (
-            <form key={p.id} action={updatePhase.bind(null, p.id)} className={`${ROW} py-2`}>
-              <input name="order" type="number" defaultValue={p.order} className="input" />
-              <input name="name" defaultValue={p.name} required className="input" />
-              <label className="inline-flex items-center gap-1 text-sm">
-                <input type="checkbox" name="active" defaultChecked={p.active} />
-              </label>
-              <div className="text-center text-sm text-slate-500">{p._count.projectPhases}</div>
-              <div className="flex gap-2">
-                <button className="btn" type="submit">Save</button>
-                <button
-                  className="btn-danger"
-                  formAction={deletePhase.bind(null, p.id)}
-                  formNoValidate
+          {phases.map((p) => {
+            const refs =
+              p._count.projectPhases + p._count.patternWeights + p._count.patternIntensities;
+            return (
+              <form key={p.id} action={updatePhase.bind(null, p.id)} className={`${ROW} py-2`}>
+                <input name="order" type="number" defaultValue={p.order} className="input" />
+                <input name="name" defaultValue={p.name} required className="input" />
+                <label className="inline-flex items-center gap-1 text-sm">
+                  <input type="checkbox" name="active" defaultChecked={p.active} />
+                </label>
+                <div
+                  className="text-center text-sm text-slate-500"
+                  title={`Project phases: ${p._count.projectPhases}, pattern weights: ${p._count.patternWeights}, intensity cells: ${p._count.patternIntensities}`}
                 >
-                  {p._count.projectPhases > 0 ? "Hide" : "Delete"}
-                </button>
-              </div>
-            </form>
-          ))}
+                  {refs}
+                </div>
+                <div className="flex gap-2">
+                  <button className="btn" type="submit">Save</button>
+                  <button
+                    className="btn-danger"
+                    formAction={deletePhase.bind(null, p.id)}
+                    formNoValidate
+                  >
+                    {refs > 0 ? "Hide" : "Delete"}
+                  </button>
+                </div>
+              </form>
+            );
+          })}
         </div>
       </div>
     </div>
