@@ -3,6 +3,15 @@
 import { db } from "@/lib/db";
 import { revalidatePath } from "next/cache";
 import { parseCsv, toBool } from "@/lib/csv";
+import { generateFromPattern } from "@/app/projects/actions";
+
+function parseIsoDate(v: string): Date | null {
+  if (!v) return null;
+  const s = v.trim();
+  if (!s) return null;
+  const d = new Date(s + (s.length === 10 ? "T00:00:00Z" : ""));
+  return isNaN(d.getTime()) ? null : d;
+}
 
 export type ImportResult = {
   ok: boolean;
@@ -76,16 +85,27 @@ export async function importRoles(formData: FormData): Promise<ImportResult> {
 }
 
 // ---------- Projects ----------
-// Columns: code, name, description, priority, status, constraint, constraintMonth
+// Columns:
+//   code, name, description, priority, status, constraint, constraintMonth,
+//   patternName, startDate, endDate
+// If patternName + startDate + endDate are all provided, phases and role
+// demand are regenerated from the pattern after the project row is upserted.
 export async function importProjects(formData: FormData): Promise<ImportResult> {
   const errors: string[] = [];
+  const info: string[] = [];
   let created = 0;
   let updated = 0;
+  let generated = 0;
   const validStatus = new Set(["PLANNED", "ACTIVE", "ON_HOLD", "COMPLETE", "CANCELLED"]);
   const validConstraint = new Set(["ASAP", "MUST_START", "MUST_FINISH"]);
   try {
     const text = await readFile(formData);
     const rows = parseCsv(text);
+
+    // Pre-fetch patterns for name → id lookup
+    const patterns = await db.projectPattern.findMany({ select: { id: true, name: true } });
+    const patternIdByName = new Map(patterns.map((p) => [p.name.toLowerCase(), p.id]));
+
     for (const [i, row] of rows.entries()) {
       const code = (row.code || "").trim();
       const name = (row.name || "").trim();
@@ -118,6 +138,35 @@ export async function importProjects(formData: FormData): Promise<ImportResult> 
         Number.isFinite(priorityN) && priorityN >= 1 && priorityN <= 5
           ? Math.round(priorityN)
           : 3;
+
+      const patternNameRaw = (row.patternName || "").trim();
+      let patternId: string | null = null;
+      if (patternNameRaw) {
+        const pid = patternIdByName.get(patternNameRaw.toLowerCase());
+        if (!pid) {
+          errors.push(
+            `Row ${i + 2}: unknown pattern "${patternNameRaw}" — check /patterns for valid names`,
+          );
+          continue;
+        }
+        patternId = pid;
+      }
+
+      const startDate = parseIsoDate(row.startDate || "");
+      const endDate = parseIsoDate(row.endDate || "");
+      if ((row.startDate || "").trim() && !startDate) {
+        errors.push(`Row ${i + 2}: startDate must be YYYY-MM-DD`);
+        continue;
+      }
+      if ((row.endDate || "").trim() && !endDate) {
+        errors.push(`Row ${i + 2}: endDate must be YYYY-MM-DD`);
+        continue;
+      }
+      if (startDate && endDate && endDate <= startDate) {
+        errors.push(`Row ${i + 2}: endDate must be after startDate`);
+        continue;
+      }
+
       const data = {
         code,
         name,
@@ -126,14 +175,30 @@ export async function importProjects(formData: FormData): Promise<ImportResult> 
         status: rawStatus,
         constraint: rawConstraint,
         constraintMonth,
+        patternId,
+        startDate,
+        endDate,
       };
       const existing = await db.project.findUnique({ where: { code } });
+      let projectId: string;
       if (existing) {
         await db.project.update({ where: { code }, data });
+        projectId = existing.id;
         updated += 1;
       } else {
-        await db.project.create({ data });
+        const c = await db.project.create({ data });
+        projectId = c.id;
         created += 1;
+      }
+
+      // Auto-generate phases + role demand if pattern + dates provided
+      if (patternId && startDate && endDate) {
+        const gen = await generateFromPattern(projectId);
+        if (gen.ok) {
+          generated += 1;
+        } else {
+          errors.push(`Row ${i + 2}: pattern regeneration failed — ${gen.message}`);
+        }
       }
     }
   } catch (e: unknown) {
@@ -147,11 +212,16 @@ export async function importProjects(formData: FormData): Promise<ImportResult> 
   }
   revalidatePath("/projects");
   revalidatePath("/level-load");
+  const parts = [
+    `${created} created`,
+    `${updated} updated`,
+    generated > 0 ? `${generated} regenerated from pattern` : null,
+    errors.length ? `${errors.length} errors` : null,
+  ].filter(Boolean);
+  info.push(...[]);
   return {
     ok: errors.length === 0,
-    message: `Projects: ${created} created, ${updated} updated${
-      errors.length ? `, ${errors.length} errors` : ""
-    }.`,
+    message: `Projects: ${parts.join(", ")}.`,
     created,
     updated,
     errors,
